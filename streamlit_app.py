@@ -347,20 +347,20 @@ def generate_quiz(context, source_mode):
     prompt = f"""
 Create a clean MCQ quiz from the provided study material.
 
-Return ONLY valid JSON. Do not include markdown, explanations outside JSON, or code fences.
+Return ONLY valid JSON. Do not include markdown, explanations outside JSON, code fences, HTML tags, CSS, or styling.
 
 JSON format:
 [
   {{
-    "question": "Question text",
+    "question": "Question text in plain text only",
     "options": {{
-      "A": "Option A",
-      "B": "Option B",
-      "C": "Option C",
-      "D": "Option D"
+      "A": "Option A in plain text only",
+      "B": "Option B in plain text only",
+      "C": "Option C in plain text only",
+      "D": "Option D in plain text only"
     }},
     "correct_answer": "B",
-    "explanation": "Short explanation"
+    "explanation": "Short explanation in plain text only"
   }}
 ]
 
@@ -371,6 +371,9 @@ Rules:
 - Use only the provided context.
 - Keep it student-friendly.
 - Do not invent facts.
+- Do not use HTML tags like <div>, <h3>, <p>, or <b>.
+- Do not use markdown tables.
+- Do not wrap the JSON in triple backticks.
 
 Knowledge source: {source_mode}
 
@@ -386,11 +389,11 @@ Context:
             messages=[
                 {
                     "role": "system",
-                    "content": "You generate valid JSON MCQs from study material."
+                    "content": "You generate only valid JSON MCQs. All JSON values must be plain text, with no HTML, no markdown, and no code fences."
                 },
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2,
+            temperature=0.15,
             max_tokens=1200
         )
 
@@ -400,6 +403,11 @@ Context:
         raw = re.sub(r"^```json\s*", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"^```\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw).strip()
+
+        # If the model returns extra text, extract the JSON list.
+        json_match = re.search(r"\[\s*\{.*\}\s*\]", raw, flags=re.DOTALL)
+        if json_match:
+            raw = json_match.group(0)
 
         quiz_items = json.loads(raw)
 
@@ -422,45 +430,65 @@ Context:
         }]
 
 
+def clean_quiz_text(value):
+    if value is None:
+        return ""
+
+    text = str(value)
+
+    # Remove markdown/code fences that may appear inside JSON values.
+    text = re.sub(r"```(?:html|json|markdown|md)?", "", text, flags=re.IGNORECASE)
+    text = text.replace("```", "")
+
+    # Convert common escaped apostrophes and HTML entities.
+    text = html.unescape(text)
+
+    # Remove HTML/XML tags if the model accidentally generated them.
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Remove leftover style fragments if any slipped through.
+    text = re.sub(r'style\s*=\s*"[^"]*"', "", text, flags=re.IGNORECASE)
+
+    # Clean whitespace.
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
 def render_quiz(quiz_items):
     st.markdown("### 🎯 Generated Quiz")
 
+    if not isinstance(quiz_items, list):
+        st.warning("Quiz format was not valid. Please generate again.")
+        return
+
     for i, item in enumerate(quiz_items, 1):
-        question = html.escape(item.get("question", ""))
+        if not isinstance(item, dict):
+            continue
+
+        question = clean_quiz_text(item.get("question", ""))
         options = item.get("options", {})
-        correct = html.escape(item.get("correct_answer", ""))
-        explanation = html.escape(item.get("explanation", ""))
+        if not isinstance(options, dict):
+            options = {}
 
-        option_a = html.escape(options.get("A", ""))
-        option_b = html.escape(options.get("B", ""))
-        option_c = html.escape(options.get("C", ""))
-        option_d = html.escape(options.get("D", ""))
+        option_a = clean_quiz_text(options.get("A", ""))
+        option_b = clean_quiz_text(options.get("B", ""))
+        option_c = clean_quiz_text(options.get("C", ""))
+        option_d = clean_quiz_text(options.get("D", ""))
+        correct = clean_quiz_text(item.get("correct_answer", ""))
+        explanation = clean_quiz_text(item.get("explanation", ""))
 
-        st.markdown(
-            f"""
-            <div class="source-box" style="margin-bottom:24px; padding:24px;">
-                <span class="source-badge">QUESTION {i}</span>
+        with st.container(border=True):
+            st.markdown(f"#### Question {i}")
+            st.markdown(f"**{question}**")
 
-                <h3 style="margin-top:18px; margin-bottom:18px;">
-                    {question}
-                </h3>
+            st.markdown(f"**A.** {option_a}")
+            st.markdown(f"**B.** {option_b}")
+            st.markdown(f"**C.** {option_c}")
+            st.markdown(f"**D.** {option_d}")
 
-                <p><b>A.</b> {option_a}</p>
-                <p><b>B.</b> {option_b}</p>
-                <p><b>C.</b> {option_c}</p>
-                <p><b>D.</b> {option_d}</p>
-
-                <div style="margin-top:18px; padding:14px; border-radius:14px; background:rgba(34,197,94,0.12);">
-                    <b>Correct Answer:</b> {correct}
-                </div>
-
-                <div style="margin-top:14px;">
-                    <b>Explanation:</b> {explanation}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+            st.success(f"Correct Answer: {correct}")
+            st.info(f"Explanation: {explanation}")
 
 
 def create_answer_pdf(question, answer, source_mode, answer_style):
