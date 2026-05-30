@@ -219,10 +219,12 @@ def build_conversation_memory():
         return "No previous conversation."
 
     recent_history = st.session_state.chat_history[-3:]
-
     memory = []
+
     for item in recent_history:
-        memory.append(f"Previous Question: {item['question']}\nPrevious Answer: {item['answer']}")
+        memory.append(
+            f"Previous Question: {item['question']}\nPrevious Answer: {item['answer']}"
+        )
 
     return "\n\n".join(memory)
 
@@ -279,8 +281,7 @@ def ask_groq(question, context, source_mode, answer_style):
 
     if not api_key:
         return (
-            "GROQ_API_KEY is missing. Add it in Render Environment Variables "
-            "or in Streamlit secrets."
+            "GROQ_API_KEY is missing. Add it in Streamlit secrets."
         )
 
     style_prompt = get_answer_style_prompt(answer_style)
@@ -299,7 +300,6 @@ Rules:
 4. If the retrieved context is weak, unrelated, or does not clearly answer the question, say:
    "The selected knowledge source does not contain enough information about this."
 5. Keep the response clear and student-friendly.
-6. When possible, naturally mention the source document or lecture context.
 
 {style_prompt}
 """
@@ -343,17 +343,27 @@ def generate_quiz(context, source_mode):
         return "GROQ_API_KEY is missing."
 
     prompt = f"""
-You are an AI teaching assistant.
-
-Create a useful quiz from the provided study material.
+Create a clean MCQ quiz from the provided study material.
 
 Rules:
-- Generate 5 multiple choice questions.
-- Each question should have 4 options: A, B, C, D.
-- Mark the correct answer.
-- Add a short explanation after each answer.
+- Generate exactly 5 multiple choice questions.
+- Format each question clearly.
+- Add a blank line between questions.
+- Put each option on a new line.
 - Use only the provided context.
 - Keep it student-friendly.
+- Use this exact format:
+
+Q1. Question text?
+
+A. Option one
+B. Option two
+C. Option three
+D. Option four
+
+Correct Answer: B. Option two
+
+Explanation: Short explanation.
 
 Knowledge source: {source_mode}
 
@@ -369,11 +379,14 @@ Quiz:
         response = client.chat.completions.create(
             model=GROQ_MODEL,
             messages=[
-                {"role": "system", "content": "You create accurate educational quizzes from provided context."},
+                {
+                    "role": "system",
+                    "content": "You create clean, well-formatted educational quizzes from provided context."
+                },
                 {"role": "user", "content": prompt}
             ],
             temperature=0.25,
-            max_tokens=900
+            max_tokens=1000
         )
 
         return response.choices[0].message.content.strip()
@@ -425,6 +438,48 @@ def create_answer_pdf(question, answer, source_mode, answer_style):
     return pdf_bytes
 
 
+def create_chat_pdf(chat_history):
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=50,
+        leftMargin=50,
+        topMargin=50,
+        bottomMargin=50
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("Multi-Source RAG Knowledge Assistant - Chat History", styles["Title"]))
+    story.append(Spacer(1, 16))
+
+    for i, item in enumerate(chat_history, 1):
+        question = html.escape(item["question"]).replace("\n", "<br/>")
+        answer = html.escape(item["answer"]).replace("\n", "<br/>")
+        source_mode = html.escape(item["source_mode"])
+        answer_style = html.escape(item["answer_style"])
+        input_mode = html.escape(item.get("input_mode", "Type Question"))
+
+        story.append(Paragraph(f"<b>Q{i}:</b> {question}", styles["Heading2"]))
+        story.append(Paragraph(f"<b>Answer:</b> {answer}", styles["BodyText"]))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            f"<b>Source:</b> {source_mode} | <b>Style:</b> {answer_style} | <b>Input:</b> {input_mode}",
+            styles["BodyText"]
+        ))
+        story.append(Spacer(1, 18))
+
+    doc.build(story)
+
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    return pdf_bytes
+
+
 def set_suggested_question(question):
     st.session_state.current_question = question
     st.session_state.voice_question = question
@@ -449,11 +504,7 @@ st.sidebar.markdown("""
 
 source_mode = st.sidebar.radio(
     "Knowledge Source",
-    [
-        "PDF Only",
-        "Lecture Transcripts Only",
-        "Both"
-    ],
+    ["PDF Only", "Lecture Transcripts Only", "Both"],
     label_visibility="collapsed"
 )
 
@@ -466,11 +517,7 @@ st.sidebar.markdown("""
 
 answer_style = st.sidebar.selectbox(
     "Answer Style",
-    [
-        "Brief",
-        "Detailed",
-        "Exam Notes"
-    ],
+    ["Brief", "Detailed", "Exam Notes"],
     index=1
 )
 
@@ -510,8 +557,7 @@ if source_mode == "PDF Only":
     if uploaded_pdfs:
         with st.spinner("Reading uploaded PDFs..."):
             for pdf in uploaded_pdfs:
-                pdf_chunks = extract_pdf_chunks(pdf)
-                all_chunks.extend(pdf_chunks)
+                all_chunks.extend(extract_pdf_chunks(pdf))
 
         pdf_count = len(uploaded_pdfs)
         st.sidebar.success(f"Processed {pdf_count} PDF(s)")
@@ -540,8 +586,7 @@ elif source_mode == "Both":
     if uploaded_pdfs:
         with st.spinner("Reading uploaded PDFs..."):
             for pdf in uploaded_pdfs:
-                pdf_chunks = extract_pdf_chunks(pdf)
-                all_chunks.extend(pdf_chunks)
+                all_chunks.extend(extract_pdf_chunks(pdf))
 
         pdf_count = len(uploaded_pdfs)
         st.sidebar.success(f"Combined: {pdf_count} PDF(s) + lecture transcripts")
@@ -600,10 +645,10 @@ if all_chunks:
         "What are the most important points to remember?"
     ]
 
-    q_cols = st.columns(2)
+    q_cols = st.columns(3)
 
     for i, suggested_q in enumerate(suggested_questions):
-        with q_cols[i % 2]:
+        with q_cols[i % 3]:
             if st.button(suggested_q, key=f"suggested_{i}"):
                 set_suggested_question(suggested_q)
                 st.rerun()
@@ -611,7 +656,7 @@ if all_chunks:
     # -------------------- QUIZ GENERATOR --------------------
     st.markdown("### 🎯 Quiz Generator")
 
-    if st.button("Generate MCQ Quiz from Current Knowledge Base"):
+    if st.button("Generate MCQ Quiz"):
         with st.spinner("Generating quiz from your uploaded material..."):
             quiz_results = retrieve(
                 "important concepts definitions examples exam questions quiz",
@@ -628,16 +673,10 @@ if all_chunks:
             st.session_state.generated_quiz = generate_quiz(quiz_context, source_mode)
 
     if st.session_state.generated_quiz:
-        st.markdown(f"""
-        <div class="answer-box">
-            <span class="ai-label">🎯 Generated Quiz</span><br><br>
-            {st.session_state.generated_quiz}
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### 🎯 Generated Quiz")
+        st.markdown(st.session_state.generated_quiz)
 
     # -------------------- ASK PANEL --------------------
-    st.markdown('<div class="ask-panel">', unsafe_allow_html=True)
-
     st.markdown("### Ask your question")
 
     input_mode = st.radio(
@@ -678,12 +717,7 @@ if all_chunks:
             placeholder="Your voice question will appear here..."
         )
 
-    col_a, col_b = st.columns([1, 4])
-
-    with col_a:
-        get_answer = st.button("Get Answer")
-
-    st.markdown('</div>', unsafe_allow_html=True)
+    get_answer = st.button("Get Answer")
 
     if get_answer:
         if question.strip():
@@ -717,19 +751,32 @@ if all_chunks:
             </div>
             """, unsafe_allow_html=True)
 
-            pdf_bytes = create_answer_pdf(
-                question,
-                answer,
-                source_mode,
-                answer_style
-            )
+            col_d1, col_d2 = st.columns(2)
 
-            st.download_button(
-                label="📄 Download Answer as PDF",
-                data=pdf_bytes,
-                file_name="rag_answer.pdf",
-                mime="application/pdf"
-            )
+            with col_d1:
+                answer_pdf = create_answer_pdf(
+                    question,
+                    answer,
+                    source_mode,
+                    answer_style
+                )
+
+                st.download_button(
+                    label="📄 Download This Answer",
+                    data=answer_pdf,
+                    file_name="rag_answer.pdf",
+                    mime="application/pdf"
+                )
+
+            with col_d2:
+                chat_pdf = create_chat_pdf(st.session_state.chat_history)
+
+                st.download_button(
+                    label="💬 Download Full Chat",
+                    data=chat_pdf,
+                    file_name="rag_chat_history.pdf",
+                    mime="application/pdf"
+                )
 
             st.markdown("### 📌 Sources Used")
 
@@ -759,6 +806,15 @@ if all_chunks:
 if st.session_state.chat_history:
     st.markdown("---")
     st.markdown("## 💬 Chat History with Memory")
+
+    chat_pdf = create_chat_pdf(st.session_state.chat_history)
+
+    st.download_button(
+        label="💬 Download Complete Chat History",
+        data=chat_pdf,
+        file_name="rag_chat_history.pdf",
+        mime="application/pdf"
+    )
 
     for i, item in enumerate(reversed(st.session_state.chat_history), 1):
         input_mode_text = item.get("input_mode", "Type Question")
