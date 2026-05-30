@@ -1,6 +1,8 @@
 import os
 import html
 import tempfile
+import json
+import re
 from io import BytesIO
 
 import streamlit as st
@@ -340,37 +342,40 @@ def generate_quiz(context, source_mode):
     api_key = get_groq_api_key()
 
     if not api_key:
-        return "GROQ_API_KEY is missing."
+        return []
 
     prompt = f"""
 Create a clean MCQ quiz from the provided study material.
 
+Return ONLY valid JSON. Do not include markdown, explanations outside JSON, or code fences.
+
+JSON format:
+[
+  {{
+    "question": "Question text",
+    "options": {{
+      "A": "Option A",
+      "B": "Option B",
+      "C": "Option C",
+      "D": "Option D"
+    }},
+    "correct_answer": "B",
+    "explanation": "Short explanation"
+  }}
+]
+
 Rules:
 - Generate exactly 5 multiple choice questions.
-- Format each question clearly.
-- Add a blank line between questions.
-- Put each option on a new line.
+- Each question must have exactly four options: A, B, C, D.
+- The correct_answer value must be only A, B, C, or D.
 - Use only the provided context.
 - Keep it student-friendly.
-- Use this exact format:
-
-Q1. Question text?
-
-A. Option one
-B. Option two
-C. Option three
-D. Option four
-
-Correct Answer: B. Option two
-
-Explanation: Short explanation.
+- Do not invent facts.
 
 Knowledge source: {source_mode}
 
 Context:
 {context}
-
-Quiz:
 """
 
     try:
@@ -381,18 +386,87 @@ Quiz:
             messages=[
                 {
                     "role": "system",
-                    "content": "You create clean, well-formatted educational quizzes from provided context."
+                    "content": "You generate valid JSON MCQs from study material."
                 },
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.25,
-            max_tokens=1000
+            temperature=0.2,
+            max_tokens=1200
         )
 
-        return response.choices[0].message.content.strip()
+        raw = response.choices[0].message.content.strip()
+
+        # Remove possible markdown fences if the model adds them.
+        raw = re.sub(r"^```json\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"^```\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw).strip()
+
+        quiz_items = json.loads(raw)
+
+        if not isinstance(quiz_items, list):
+            return []
+
+        return quiz_items[:5]
 
     except Exception as e:
-        return f"Groq error: {e}"
+        return [{
+            "question": "Quiz generation failed",
+            "options": {
+                "A": "",
+                "B": "",
+                "C": "",
+                "D": ""
+            },
+            "correct_answer": "",
+            "explanation": str(e)
+        }]
+
+
+def render_quiz(quiz_items):
+    st.markdown("### 🎯 Generated Quiz")
+
+    if isinstance(quiz_items, str):
+        st.markdown(quiz_items)
+        return
+
+    if not quiz_items:
+        st.warning("Quiz could not be generated. Please try again.")
+        return
+
+    for i, item in enumerate(quiz_items, 1):
+        question = html.escape(str(item.get("question", "")))
+        options = item.get("options", {})
+        correct_key = html.escape(str(item.get("correct_answer", "")))
+        explanation = html.escape(str(item.get("explanation", "")))
+
+        option_a = html.escape(str(options.get("A", "")))
+        option_b = html.escape(str(options.get("B", "")))
+        option_c = html.escape(str(options.get("C", "")))
+        option_d = html.escape(str(options.get("D", "")))
+
+        correct_text = html.escape(str(options.get(correct_key, "")))
+
+        st.markdown(f"""
+        <div class="source-box" style="margin-bottom:24px; padding:22px;">
+            <span class="source-badge">Question {i}</span>
+            <h4 style="margin-top:14px; margin-bottom:16px;">{question}</h4>
+
+            <div style="line-height:1.9;">
+                <p><b>A.</b> {option_a}</p>
+                <p><b>B.</b> {option_b}</p>
+                <p><b>C.</b> {option_c}</p>
+                <p><b>D.</b> {option_d}</p>
+            </div>
+
+            <div style="margin-top:18px; padding:14px; border-radius:14px; background:rgba(34,197,94,0.10);">
+                <b>Correct Answer:</b> {correct_key}. {correct_text}
+            </div>
+
+            <div style="margin-top:14px;">
+                <b>Explanation:</b> {explanation}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def create_answer_pdf(question, answer, source_mode, answer_style):
@@ -673,8 +747,7 @@ if all_chunks:
             st.session_state.generated_quiz = generate_quiz(quiz_context, source_mode)
 
     if st.session_state.generated_quiz:
-        st.markdown("### 🎯 Generated Quiz")
-        st.markdown(st.session_state.generated_quiz)
+        render_quiz(st.session_state.generated_quiz)
 
     # -------------------- ASK PANEL --------------------
     st.markdown("### Ask your question")
