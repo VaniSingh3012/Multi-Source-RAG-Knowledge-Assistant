@@ -1,0 +1,15 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+
+audios/
+videos/
+jsons_backup/
+*.mp3
+*.mp4
+
+.streamlit/
+.DS_Store
+Thumbs.db
