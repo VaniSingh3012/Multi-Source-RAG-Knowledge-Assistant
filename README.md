@@ -197,6 +197,29 @@ https://your-app.streamlit.app
 
 ---
 
+## 📸 Application Screenshots
+
+
+🏠 Dashboard & Features
+
+<img width="926" height="436" alt="Screenshot 2026-05-31 010349" src="https://github.com/user-attachments/assets/473f7716-4344-4056-ab5a-f5330c2e7ceb" />
+
+📚Smart Learning Assistant
+
+<img width="927" height="434" alt="Screenshot 2026-05-31 010426" src="https://github.com/user-attachments/assets/e2ede82c-a96d-4a7e-96aa-1ea4df058bdc" />
+
+🎤 Voice-Powered Question Answering
+
+<img width="920" height="434" alt="Screenshot 2026-05-31 010509" src="https://github.com/user-attachments/assets/d74d28fe-2d03-4702-96f0-6110a34245de" />
+
+🤖 Context-Aware AI Responses
+
+<img width="925" height="437" alt="Screenshot 2026-05-31 010641" src="https://github.com/user-attachments/assets/42e80e60-2e79-4705-8d9e-38d245c5ea1a" />
+
+
+
+
+
 ## 📈 Future Enhancements
 
 - Multi-PDF cross-document reasoning
